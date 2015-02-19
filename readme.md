@@ -14,6 +14,7 @@ MysqliDb -- Simple MySQLi wrapper with prepared statements
 **[Properties Sharing](#properties-sharing)**  
 **[Joining Tables](#join-method)**  
 **[Subqueries](#subqueries)**  
+**[EXISTS / NOT EXISTS condition](#exists--not-exists-condition)** 
 **[Helper Functions](#helper-commands)**  
 **[Transaction Helpers](#transaction-helpers)**  
 
@@ -24,10 +25,27 @@ To utilize this class, first import MysqliDb.php into your project, and require 
 require_once ('MysqliDb.php');
 ```
 
-After that, create a new instance of the class.
-
+Simple initialization with utf8 charset by default:
 ```php
 $db = new MysqliDb ('host', 'username', 'password', 'databaseName');
+```
+
+Advanced initialization. If no charset should be set charset, set it to null
+```php
+$db = new Mysqlidb (Array (
+                'host' => 'host',
+                'username' => 'username', 
+                'password' => 'password',
+                'db'=> 'databaseName',
+                'port' => 3306,
+                'charset' => 'utf8'));
+```
+port and charset params are optional.
+
+Reuse already connected mysqli:
+```php
+$mysqli = new mysqli ('host', 'username', 'password', 'databaseName');
+$db = new Mysqlidb ($mysqli);
 ```
 
 Its also possible to set a table prefix:
@@ -118,6 +136,13 @@ echo $user['id'];
 
 $stats = $db->getOne ("users", "sum(id), count(*) as cnt");
 echo "total ".$stats['cnt']. "users found";
+```
+
+or select one column or function result
+
+```php
+$count = getValue ("users", "count(*)");
+echo "{$count} users found";
 ```
 
 ### Delete Query
@@ -253,8 +278,16 @@ $results = $db
 ```php
 $db->orderBy("id","asc");
 $db->orderBy("login","Desc");
+$db->orderBy("RAND ()");
 $results = $db->get('users');
-// Gives: SELECT * FROM users ORDER BY id ASC,login DESC;
+// Gives: SELECT * FROM users ORDER BY id ASC,login DESC, RAND ();
+```
+
+order by values example:
+```php
+$db->orderBy('userGroup', 'ASC', array('superuser', 'admin', 'users'));
+$db->get('users');
+// Gives: SELECT * FROM users ORDER BY FIELD (userGroup, 'superuser', 'admin', 'users') ASC;
 ```
 
 ### Grouping method
@@ -275,19 +308,36 @@ print_r ($products);
 
 ### Properties sharing
 Its is also possible to copy properties
+
+Simple pagination example:
 ```php
 $db->where ("agentId", 10);
+$db->where ("active", true);
 
 $customers = $db->copy ();
-$res = $customers->get ("customers");
-// SELECT * FROM customers where agentId = 10
+$res = $customers->get ("customers", Array (10, 10));
+// SELECT * FROM customers where agentId = 10 and active = 1 limit 10, 10
 
-$db->orWhere ("agentId", 20);
-$res = $db->get ("users");
-// SELECT * FROM users where agentId = 10 or agentId = 20
+$cnt = $db->getValue ("customers", "count(id)");
+echo "total records found: " . $cnt;
+// SELECT count(id) FROM users where agentId = 10 and active = 1
 ```
 
 ### Subqueries
+Subquery init
+
+Subquery init without an alias to use in inserts/updates/where Eg. (select * from users)
+```php
+$sq = $db->subQuery();
+$sq->get ("users");
+```
+ 
+A subquery with an alias specified to use in JOINs . Eg. (select * from users) sq
+```php
+$sq = $db->subQuery("sq");
+$sq->get ("users");
+```
+
 Subquery in selects:
 ```php
 $ids = $db->subQuery ();
@@ -313,6 +363,29 @@ $data = Array (
 $id = $db->insert ("products", $data);
 // Gives INSERT INTO PRODUCTS (productName, userId, lastUpdated) values ("test product", (SELECT name FROM users WHERE id = 6), NOW());
 ```
+
+Subquery in joins:
+```php
+$usersQ = $db->subQuery ("u");
+$usersQ->where ("active", 1);
+$usersQ->get ("users");
+
+$db->join($usersQ, "p.userId=u.id", "LEFT");
+$products = $db->get ("products p", null, "u.login, p.productName");
+print_r ($products);
+// SELECT u.login, p.productName FROM products p LEFT JOIN (SELECT * FROM t_users WHERE active = 1) u on p.userId=u.id;
+```
+
+###EXISTS / NOT EXISTS condition
+```php
+$sub = $db->subQuery();
+    $sub->where("company", 'testCompany');
+    $sub->get ("users", null, 'userId');
+$db->where (null, $sub, 'exists');
+$products = $db->get ("products");
+// Gives SELECT * FROM products WHERE EXISTS (select userId from users where company='testCompany')
+```
+
 ### Helper commands
 Reconnect in case mysql connection died
 ```php
